@@ -44,6 +44,9 @@
   .col-head .dot { width: 9px; height: 9px; border-radius: 50%; }
   .col-head .count { margin-left: auto; color: var(--muted); font-weight: 600; }
   .col-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; min-height: 40px; }
+  .col-body.drag-over { background: #eff4ff; outline: 2px dashed var(--accent); outline-offset: -4px; border-radius: 8px; }
+  .card.dragging { opacity: .45; }
+  .card { cursor: grab; }
   .card { border: 1px solid var(--line); border-radius: 9px; padding: 11px 12px; background: #fff; box-shadow: var(--shadow);
           cursor: pointer; }
   .card:hover { border-color: var(--accent); }
@@ -137,6 +140,7 @@
     <div class="modal-actions">
       <button id="mSave" class="primary">保存</button>
       <button id="mCancel">キャンセル</button>
+      <button id="mDelete" style="color:var(--hi);border-color:#f3c2c2;">削除</button>
       <span class="spacer"></span>
       <span id="mSaving" class="repo" style="align-self:center;color:var(--muted);"></span>
     </div>
@@ -304,9 +308,18 @@ function render(){
     col.innerHTML = `<div class="col-head"><span class="dot" style="background:${s.color}"></span>${s.label}
       <span class="count">${items.length}</span></div><div class="col-body"></div>`;
     const body = col.querySelector(".col-body");
-    if (!items.length) body.innerHTML = `<div class="empty">—</div>`;
+    body.dataset.status = s.key;
+    body.addEventListener("dragover", e=>{ e.preventDefault(); body.classList.add("drag-over"); });
+    body.addEventListener("dragleave", e=>{ if (!body.contains(e.relatedTarget)) body.classList.remove("drag-over"); });
+    body.addEventListener("drop", e=>{
+      e.preventDefault(); body.classList.remove("drag-over");
+      const file = e.dataTransfer.getData("text/plain");
+      const t = TASKS.find(x=>x.file===file);
+      if (t && t.status!==s.key) moveTask(t, s.key);
+    });
+    if (!items.length) body.innerHTML = `<div class="empty">ここにドロップ</div>`;
     items.forEach(t=>{
-      const card = document.createElement("div"); card.className="card";
+      const card = document.createElement("div"); card.className="card"; card.draggable = true;
       card.innerHTML = `
         <div class="title">${esc(t.title)}</div>
         <div class="meta">
@@ -316,6 +329,8 @@ function render(){
           ${t.due?`<span class="pill ${dueSoon(t.due)&&t.status!=="done"?"due-soon":""}">📅 ${esc(t.due)}</span>`:""}
           ${t.tags.map(tag=>`<span class="tag">#${esc(tag)}</span>`).join("")}
         </div>`;
+      card.addEventListener("dragstart", e=>{ e.dataTransfer.setData("text/plain", t.file); e.dataTransfer.effectAllowed="move"; card.classList.add("dragging"); });
+      card.addEventListener("dragend", ()=> card.classList.remove("dragging"));
       card.onclick = ()=> openEdit(t);
       body.appendChild(card);
     });
@@ -337,6 +352,7 @@ function openEdit(t){
   $("mTags").value = (t?.tags||[]).join(", ");
   $("mBody").value = t?.body || "";
   $("mSaving").textContent = "";
+  $("mDelete").style.display = t ? "" : "none";
   $("overlay").classList.add("open");
 }
 function closeEdit(){ $("overlay").classList.remove("open"); editing=null; }
@@ -365,6 +381,34 @@ async function saveTask(){
   }catch(e){ $("mSaving").textContent = ""; banner("err", e.message); }
 }
 
+async function moveTask(t, status){
+  const prev = t.status;
+  t.status = status; t.updated = todayStr();
+  render(); // 楽観更新
+  try{
+    const res = await putTask(t, t.sha);
+    t.sha = res.content?.sha;
+    banner("ok", `「${t.title}」→ ${STATUSES.find(s=>s.key===status).label}`);
+    setTimeout(()=>banner(""), 2000);
+  }catch(e){ t.status = prev; render(); banner("err", e.message); }
+}
+
+async function deleteTask(){
+  if (!editing) return;
+  if (!confirm(`「${editing.title}」を削除しますか？\n（ファイルは削除されますが git 履歴には残ります）`)) return;
+  const target = editing;
+  try{
+    $("mSaving").textContent = "削除中…";
+    await gh(`/repos/${REPO.owner}/${REPO.repo}/contents/${REPO.dir}/${encodeURIComponent(target.file)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ message: `tasks: delete ${target.id} ${target.title}`.slice(0,72), sha: target.sha, branch: REPO.branch }),
+    });
+    TASKS = TASKS.filter(x=>x.file!==target.file);
+    closeEdit(); render(); banner("ok", `削除しました: ${target.id}`);
+    setTimeout(()=>banner(""), 2000);
+  }catch(e){ $("mSaving").textContent = ""; banner("err", e.message); }
+}
+
 /* ===== load ===== */
 async function load(){
   if (!getToken()){ banner("info", "まず「トークン設定」で GitHub トークンを入力してください。"); return; }
@@ -379,6 +423,7 @@ $("newBtn").onclick = ()=> openEdit(null);
 $("reloadBtn").onclick = load;
 $("mSave").onclick = saveTask;
 $("mCancel").onclick = closeEdit;
+$("mDelete").onclick = deleteTask;
 $("tokenBtn").onclick = ()=>{ $("tokenInput").value = getToken(); $("tokenOverlay").classList.add("open"); };
 $("tokenSave").onclick = ()=>{ localStorage.setItem(TOKEN_KEY, $("tokenInput").value.trim()); $("tokenOverlay").classList.remove("open"); load(); };
 $("tokenClear").onclick = ()=>{ localStorage.removeItem(TOKEN_KEY); $("tokenInput").value=""; };
