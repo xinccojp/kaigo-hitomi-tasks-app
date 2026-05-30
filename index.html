@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>介護のひとみさん — ビジネス課題ボード</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --panel: #ffffff; --ink: #1c2733; --muted: #6b7785;
+    --line: #e2e8f0; --accent: #2563eb; --accent-ink: #fff;
+    --hi: #dc2626; --med: #d97706; --lo: #2563eb;
+    --todo: #64748b; --doing: #2563eb; --blocked: #dc2626; --done: #16a34a;
+    --radius: 10px; --shadow: 0 1px 3px rgba(16,24,40,.08), 0 1px 2px rgba(16,24,40,.06);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+         color: var(--ink); background: var(--bg); font-size: 15px; line-height: 1.6; }
+  header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 12px 18px;
+           display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; top: 0; z-index: 20; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 700; }
+  header .repo { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--panel);
+           color: var(--ink); border-radius: 8px; padding: 7px 12px; }
+  button:hover { background: #f0f4f8; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.primary:hover { filter: brightness(1.05); }
+  button.ghost { border-color: transparent; }
+  input, select, textarea { font: inherit; color: var(--ink); border: 1px solid var(--line);
+           border-radius: 8px; padding: 7px 10px; background: #fff; width: 100%; }
+  textarea { min-height: 120px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  label { font-size: 12px; color: var(--muted); display: block; margin: 10px 0 4px; font-weight: 600; }
+  .toolbar { display: flex; gap: 8px; align-items: center; padding: 12px 18px; flex-wrap: wrap; }
+  .toolbar select { width: auto; min-width: 120px; }
+  .toolbar .grow { flex: 1; }
+  main { padding: 0 18px 40px; }
+  .board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; align-items: start; }
+  @media (max-width: 900px) { .board { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 560px) { .board { grid-template-columns: 1fr; } }
+  .col { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); min-height: 80px; }
+  .col-head { padding: 10px 12px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 13px;
+              display: flex; align-items: center; gap: 8px; position: sticky; top: 56px; background: var(--panel);
+              border-top-left-radius: var(--radius); border-top-right-radius: var(--radius); }
+  .col-head .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .col-head .count { margin-left: auto; color: var(--muted); font-weight: 600; }
+  .col-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; min-height: 40px; }
+  .card { border: 1px solid var(--line); border-radius: 9px; padding: 11px 12px; background: #fff; box-shadow: var(--shadow);
+          cursor: pointer; }
+  .card:hover { border-color: var(--accent); }
+  .card .title { font-weight: 600; margin-bottom: 6px; }
+  .card .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+  .pill { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); background: #f8fafc; }
+  .pill.high { color: var(--hi); border-color: #f3c2c2; background: #fef2f2; }
+  .pill.med { color: var(--med); border-color: #f5dcab; background: #fffbeb; }
+  .pill.low { color: var(--lo); border-color: #c7d6f5; background: #eff4ff; }
+  .pill.cat { background: #f1f5f9; }
+  .pill.due-soon { color: var(--hi); border-color: #f3c2c2; background: #fef2f2; }
+  .tag { font-size: 11px; color: var(--accent); }
+  .empty { color: var(--muted); font-size: 13px; padding: 18px; text-align: center; }
+  /* modal */
+  .overlay { position: fixed; inset: 0; background: rgba(16,24,40,.45); display: none; align-items: flex-start;
+             justify-content: center; padding: 40px 16px; z-index: 50; overflow: auto; }
+  .overlay.open { display: flex; }
+  .modal { background: var(--panel); border-radius: 14px; width: 100%; max-width: 640px; padding: 20px 22px;
+           box-shadow: 0 20px 50px rgba(16,24,40,.35); }
+  .modal h2 { margin: 0 0 4px; font-size: 16px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 18px; }
+  .modal-actions .spacer { flex: 1; }
+  .banner { padding: 9px 14px; font-size: 13px; border-radius: 8px; margin: 12px 18px 0; }
+  .banner.err { background: #fef2f2; color: var(--hi); border: 1px solid #f3c2c2; }
+  .banner.ok { background: #ecfdf5; color: var(--done); border: 1px solid #bbf7d0; }
+  .banner.info { background: #eff6ff; color: var(--accent); border: 1px solid #c7d6f5; }
+  code { background: #eef2f6; padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+  .markdown-body { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ビジネス課題ボード</h1>
+  <span class="repo" id="repoLabel"></span>
+  <span class="spacer"></span>
+  <button id="newBtn" class="primary">＋ 新規</button>
+  <button id="reloadBtn">再読込</button>
+  <button id="tokenBtn">トークン設定</button>
+</header>
+
+<div id="banner"></div>
+
+<div class="toolbar">
+  <select id="fCategory"><option value="">区分: 全て</option></select>
+  <select id="fOwner"><option value="">担当: 全て</option></select>
+  <select id="fTag"><option value="">タグ: 全て</option></select>
+  <select id="fPriority">
+    <option value="">優先度: 全て</option>
+    <option value="high">高</option><option value="med">中</option><option value="low">低</option>
+  </select>
+  <input id="fSearch" class="grow" placeholder="キーワード検索（タイトル・本文）" />
+  <label style="display:flex;align-items:center;gap:6px;margin:0;white-space:nowrap;">
+    <input type="checkbox" id="fHideDone" style="width:auto;" /> 完了を隠す
+  </label>
+</div>
+
+<main><div class="board" id="board"></div></main>
+
+<!-- task modal -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h2 id="mTitle">タスク</h2>
+    <div id="mFileNote" class="repo" style="color:var(--muted);font-size:12px;"></div>
+    <label>タイトル</label>
+    <input id="mTitleInput" placeholder="例: 国保中央会 標準マスタ 利用申込" />
+    <div class="row2">
+      <div><label>状態</label>
+        <select id="mStatus">
+          <option value="todo">未着手</option><option value="doing">進行中</option>
+          <option value="blocked">保留/ブロック</option><option value="done">完了</option>
+        </select></div>
+      <div><label>優先度</label>
+        <select id="mPriority"><option value="high">高</option><option value="med">中</option><option value="low">低</option></select></div>
+    </div>
+    <div class="row2">
+      <div><label>区分</label>
+        <select id="mCategory">
+          <option value="調達">調達</option><option value="申込/契約">申込/契約</option>
+          <option value="営業">営業</option><option value="パイロット">パイロット</option>
+          <option value="法務">法務</option><option value="採用">採用</option><option value="その他">その他</option>
+        </select></div>
+      <div><label>担当</label><input id="mOwner" placeholder="例: Satoru" /></div>
+    </div>
+    <div class="row2">
+      <div><label>期限 (YYYY-MM-DD)</label><input id="mDue" placeholder="2026-06-30" /></div>
+      <div><label>タグ (カンマ区切り)</label><input id="mTags" placeholder="国保中央会, B-15" /></div>
+    </div>
+    <label>詳細 (Markdown)</label>
+    <textarea id="mBody" placeholder="背景・窓口・費用・注意点など"></textarea>
+    <div class="modal-actions">
+      <button id="mSave" class="primary">保存</button>
+      <button id="mCancel">キャンセル</button>
+      <span class="spacer"></span>
+      <span id="mSaving" class="repo" style="align-self:center;color:var(--muted);"></span>
+    </div>
+  </div>
+</div>
+
+<!-- token modal -->
+<div class="overlay" id="tokenOverlay">
+  <div class="modal">
+    <h2>GitHub トークン設定</h2>
+    <p style="font-size:13px;color:var(--muted);margin:6px 0 0;">
+      fine-grained PAT（このリポジトリの Contents: Read and write 権限）を入力。
+      ブラウザの localStorage にのみ保存され、サーバには送られません（GitHub API へのみ使用）。
+    </p>
+    <label>Personal Access Token</label>
+    <input id="tokenInput" type="password" placeholder="github_pat_..." />
+    <div class="modal-actions">
+      <button id="tokenSave" class="primary">保存</button>
+      <button id="tokenClear">クリア</button>
+      <button id="tokenCancel">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== 設定（ソースで管理。env varは使わない） ===== */
+const REPO = { owner: "xinccojp", repo: "kaigo-hitomi-tasks", branch: "main", dir: "tasks" };
+const STATUSES = [
+  { key: "todo",    label: "未着手",      color: "var(--todo)" },
+  { key: "doing",   label: "進行中",      color: "var(--doing)" },
+  { key: "blocked", label: "保留/ブロック", color: "var(--blocked)" },
+  { key: "done",    label: "完了",        color: "var(--done)" },
+];
+const PRIORITY_LABEL = { high: "高", med: "中", low: "低" };
+const TOKEN_KEY = "khtasks.pat";
+
+/* ===== util ===== */
+const $ = (id) => document.getElementById(id);
+const api = (path) => `https://api.github.com${path}`;
+function b64encode(str){ return btoa(String.fromCharCode(...new TextEncoder().encode(str))); }
+function b64decode(b64){ const bin = atob(b64.replace(/\n/g,"")); return new TextDecoder().decode(Uint8Array.from(bin, c=>c.charCodeAt(0))); }
+function getToken(){ return localStorage.getItem(TOKEN_KEY) || ""; }
+function esc(s){ return (s||"").replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function banner(kind, msg){ $("banner").innerHTML = msg ? `<div class="banner ${kind}">${esc(msg)}</div>` : ""; }
+
+/* ===== frontmatter (限定YAML: スカラ + tags配列) ===== */
+function parseTask(text, file, sha){
+  const m = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  const fm = {}; let body = text;
+  if (m){ body = m[2];
+    m[1].split("\n").forEach(line=>{
+      const i = line.indexOf(":"); if (i<0) return;
+      const k = line.slice(0,i).trim(); let v = line.slice(i+1).trim();
+      if (k==="tags"){ v = v.replace(/^\[|\]$/g,""); fm.tags = v ? v.split(",").map(s=>s.trim()).filter(Boolean) : []; }
+      else fm[k] = v.replace(/^["']|["']$/g,"");
+    });
+  }
+  return {
+    file, sha, id: fm.id || file.replace(/\.md$/,""),
+    title: fm.title || "(無題)", status: fm.status || "todo",
+    priority: fm.priority || "med", category: fm.category || "その他",
+    owner: fm.owner || "", due: fm.due || "", tags: fm.tags || [],
+    created: fm.created || "", updated: fm.updated || "", body: body.trim(),
+  };
+}
+function serializeTask(t){
+  const fm = [
+    `id: ${t.id}`, `title: ${t.title}`, `status: ${t.status}`,
+    `priority: ${t.priority}`, `category: ${t.category}`, `owner: ${t.owner}`,
+    `due: ${t.due}`, `tags: [${(t.tags||[]).join(", ")}]`,
+    `created: ${t.created}`, `updated: ${t.updated}`,
+  ].join("\n");
+  return `---\n${fm}\n---\n\n${(t.body||"").trim()}\n`;
+}
+
+/* ===== GitHub API ===== */
+async function gh(path, opts={}){
+  const token = getToken();
+  if (!token) throw new Error("トークン未設定です。「トークン設定」から入力してください。");
+  const res = await fetch(api(path), {
+    ...opts,
+    headers: { "Authorization": `Bearer ${token}`, "Accept": "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28", ...(opts.headers||{}) },
+  });
+  if (res.status === 401) throw new Error("認証エラー (401)。トークンを確認してください。");
+  if (res.status === 403) throw new Error("権限エラー (403)。トークンに Contents: Read and write があるか確認。");
+  if (!res.ok && res.status !== 404){ const e = await res.text(); throw new Error(`API ${res.status}: ${e.slice(0,200)}`); }
+  return res;
+}
+async function listTasks(){
+  const res = await gh(`/repos/${REPO.owner}/${REPO.repo}/contents/${REPO.dir}?ref=${REPO.branch}`);
+  if (res.status === 404) return [];
+  const entries = (await res.json()).filter(e => e.type==="file" && e.name.endsWith(".md"));
+  const tasks = await Promise.all(entries.map(async e=>{
+    const r = await gh(`/repos/${REPO.owner}/${REPO.repo}/contents/${REPO.dir}/${encodeURIComponent(e.name)}?ref=${REPO.branch}`);
+    const j = await r.json();
+    return parseTask(b64decode(j.content), e.name, j.sha);
+  }));
+  return tasks;
+}
+async function putTask(t, sha){
+  const path = `/repos/${REPO.owner}/${REPO.repo}/contents/${REPO.dir}/${encodeURIComponent(t.file)}`;
+  const body = { message: `tasks: ${sha?"update":"add"} ${t.id} ${t.title}`.slice(0,72),
+                 content: b64encode(serializeTask(t)), branch: REPO.branch };
+  if (sha) body.sha = sha;
+  const res = await gh(path, { method:"PUT", body: JSON.stringify(body) });
+  return res.json();
+}
+
+/* ===== state ===== */
+let TASKS = [];
+let editing = null;
+
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function nextId(){
+  let max = 0;
+  TASKS.forEach(t=>{ const m=(t.id||"").match(/T-(\d+)/); if(m) max=Math.max(max, +m[1]); });
+  return "T-" + String(max+1).padStart(4,"0");
+}
+function dueSoon(due){
+  if (!due) return false;
+  const d = new Date(due+"T00:00:00"); if (isNaN(d)) return false;
+  const diff = (d - new Date()) / 86400000;
+  return diff <= 7;
+}
+
+/* ===== filters ===== */
+function refreshFilterOptions(){
+  const cats = [...new Set(TASKS.map(t=>t.category).filter(Boolean))].sort();
+  const owners = [...new Set(TASKS.map(t=>t.owner).filter(Boolean))].sort();
+  const tags = [...new Set(TASKS.flatMap(t=>t.tags).filter(Boolean))].sort();
+  fillSelect("fCategory", "区分: 全て", cats);
+  fillSelect("fOwner", "担当: 全て", owners);
+  fillSelect("fTag", "タグ: 全て", tags);
+}
+function fillSelect(id, allLabel, items){
+  const el = $(id); const cur = el.value;
+  el.innerHTML = `<option value="">${allLabel}</option>` + items.map(v=>`<option>${esc(v)}</option>`).join("");
+  if (items.includes(cur)) el.value = cur;
+}
+function applyFilters(list){
+  const cat=$("fCategory").value, ow=$("fOwner").value, tg=$("fTag").value,
+        pr=$("fPriority").value, q=$("fSearch").value.trim().toLowerCase(), hideDone=$("fHideDone").checked;
+  return list.filter(t=>{
+    if (cat && t.category!==cat) return false;
+    if (ow && t.owner!==ow) return false;
+    if (tg && !t.tags.includes(tg)) return false;
+    if (pr && t.priority!==pr) return false;
+    if (hideDone && t.status==="done") return false;
+    if (q && !(`${t.title} ${t.body}`.toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+
+/* ===== render ===== */
+function render(){
+  refreshFilterOptions();
+  const list = applyFilters(TASKS);
+  const prRank = { high:0, med:1, low:2 };
+  list.sort((a,b)=> (prRank[a.priority]-prRank[b.priority]) || ((a.due||"9999")>(b.due||"9999")?1:-1));
+  const board = $("board"); board.innerHTML = "";
+  STATUSES.forEach(s=>{
+    const items = list.filter(t=>t.status===s.key);
+    const col = document.createElement("div"); col.className="col";
+    col.innerHTML = `<div class="col-head"><span class="dot" style="background:${s.color}"></span>${s.label}
+      <span class="count">${items.length}</span></div><div class="col-body"></div>`;
+    const body = col.querySelector(".col-body");
+    if (!items.length) body.innerHTML = `<div class="empty">—</div>`;
+    items.forEach(t=>{
+      const card = document.createElement("div"); card.className="card";
+      card.innerHTML = `
+        <div class="title">${esc(t.title)}</div>
+        <div class="meta">
+          <span class="pill ${t.priority}">${PRIORITY_LABEL[t.priority]||t.priority}</span>
+          <span class="pill cat">${esc(t.category)}</span>
+          ${t.owner?`<span>👤 ${esc(t.owner)}</span>`:""}
+          ${t.due?`<span class="pill ${dueSoon(t.due)&&t.status!=="done"?"due-soon":""}">📅 ${esc(t.due)}</span>`:""}
+          ${t.tags.map(tag=>`<span class="tag">#${esc(tag)}</span>`).join("")}
+        </div>`;
+      card.onclick = ()=> openEdit(t);
+      body.appendChild(card);
+    });
+    board.appendChild(col);
+  });
+}
+
+/* ===== modal ===== */
+function openEdit(t){
+  editing = t;
+  $("mTitle").textContent = t ? "タスク編集" : "新規タスク";
+  $("mFileNote").textContent = t ? `${REPO.dir}/${t.file}` : "";
+  $("mTitleInput").value = t?.title || "";
+  $("mStatus").value = t?.status || "todo";
+  $("mPriority").value = t?.priority || "med";
+  $("mCategory").value = t?.category || "調達";
+  $("mOwner").value = t?.owner || "";
+  $("mDue").value = t?.due || "";
+  $("mTags").value = (t?.tags||[]).join(", ");
+  $("mBody").value = t?.body || "";
+  $("mSaving").textContent = "";
+  $("overlay").classList.add("open");
+}
+function closeEdit(){ $("overlay").classList.remove("open"); editing=null; }
+
+async function saveTask(){
+  const title = $("mTitleInput").value.trim();
+  if (!title){ $("mSaving").textContent = "タイトルは必須です"; return; }
+  const isNew = !editing;
+  const id = isNew ? nextId() : editing.id;
+  const t = {
+    id, file: isNew ? `${id}.md` : editing.file, title,
+    status: $("mStatus").value, priority: $("mPriority").value, category: $("mCategory").value,
+    owner: $("mOwner").value.trim(), due: $("mDue").value.trim(),
+    tags: $("mTags").value.split(",").map(s=>s.trim()).filter(Boolean),
+    created: isNew ? todayStr() : (editing.created || todayStr()),
+    updated: todayStr(), body: $("mBody").value,
+  };
+  try{
+    $("mSaving").textContent = "保存中…";
+    const res = await putTask(t, isNew ? null : editing.sha);
+    t.sha = res.content?.sha;
+    if (isNew) TASKS.push(t);
+    else { const i = TASKS.findIndex(x=>x.file===t.file); if(i>=0) TASKS[i]=t; }
+    closeEdit(); render(); banner("ok", `保存しました: ${t.id} ${t.title}`);
+    setTimeout(()=>banner(""), 2500);
+  }catch(e){ $("mSaving").textContent = ""; banner("err", e.message); }
+}
+
+/* ===== load ===== */
+async function load(){
+  if (!getToken()){ banner("info", "まず「トークン設定」で GitHub トークンを入力してください。"); return; }
+  banner("info", "読み込み中…");
+  try{ TASKS = await listTasks(); banner(""); render(); }
+  catch(e){ banner("err", e.message); }
+}
+
+/* ===== wire up ===== */
+$("repoLabel").textContent = `${REPO.owner}/${REPO.repo}`;
+$("newBtn").onclick = ()=> openEdit(null);
+$("reloadBtn").onclick = load;
+$("mSave").onclick = saveTask;
+$("mCancel").onclick = closeEdit;
+$("tokenBtn").onclick = ()=>{ $("tokenInput").value = getToken(); $("tokenOverlay").classList.add("open"); };
+$("tokenSave").onclick = ()=>{ localStorage.setItem(TOKEN_KEY, $("tokenInput").value.trim()); $("tokenOverlay").classList.remove("open"); load(); };
+$("tokenClear").onclick = ()=>{ localStorage.removeItem(TOKEN_KEY); $("tokenInput").value=""; };
+$("tokenCancel").onclick = ()=> $("tokenOverlay").classList.remove("open");
+["fCategory","fOwner","fTag","fPriority","fHideDone"].forEach(id=> $(id).onchange = render);
+$("fSearch").oninput = render;
+[$("overlay"),$("tokenOverlay")].forEach(o=> o.onclick = (e)=>{ if(e.target===o) o.classList.remove("open"); });
+
+load();
+</script>
+</body>
+</html>
