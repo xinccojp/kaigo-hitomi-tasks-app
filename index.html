@@ -76,6 +76,21 @@
   .banner.info { background: #eff6ff; color: var(--accent); border: 1px solid #c7d6f5; }
   code { background: #eef2f6; padding: 1px 5px; border-radius: 5px; font-size: 12px; }
   .markdown-body { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .pill.overdue { color: #fff; border-color: var(--hi); background: var(--hi); }
+  .md-rendered { font-size: 14px; line-height: 1.7; word-break: break-word; }
+  .md-rendered h1, .md-rendered h2, .md-rendered h3 { margin: 14px 0 6px; line-height: 1.3; }
+  .md-rendered h1 { font-size: 18px; } .md-rendered h2 { font-size: 16px; } .md-rendered h3 { font-size: 14px; color: var(--muted); }
+  .md-rendered p { margin: 6px 0; }
+  .md-rendered ul { margin: 6px 0; padding-left: 22px; }
+  .md-rendered li { margin: 3px 0; }
+  .md-rendered li.task { list-style: none; margin-left: -18px; }
+  .md-rendered li.task input { width: auto; margin-right: 6px; vertical-align: -1px; }
+  .md-rendered code { background: #eef2f6; padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+  .md-rendered a { color: var(--accent); }
+  .md-rendered table { border-collapse: collapse; margin: 8px 0; font-size: 13px; width: 100%; }
+  .md-rendered th, .md-rendered td { border: 1px solid var(--line); padding: 5px 9px; text-align: left; }
+  .md-rendered th { background: #f1f5f9; }
+  .md-rendered hr { border: none; border-top: 1px solid var(--line); margin: 12px 0; }
 </style>
 </head>
 <body>
@@ -143,6 +158,23 @@
       <button id="mDelete" style="color:var(--hi);border-color:#f3c2c2;">削除</button>
       <span class="spacer"></span>
       <span id="mSaving" class="repo" style="align-self:center;color:var(--muted);"></span>
+    </div>
+  </div>
+</div>
+
+<!-- view (read) modal -->
+<div class="overlay" id="viewOverlay">
+  <div class="modal">
+    <div style="display:flex;align-items:flex-start;gap:10px;">
+      <h2 id="vTitle" style="flex:1;">タスク</h2>
+    </div>
+    <div id="vMeta" class="meta" style="margin:2px 0 4px;"></div>
+    <div id="vFileNote" class="repo" style="color:var(--muted);font-size:12px;margin-bottom:10px;"></div>
+    <div id="vBody" class="md-rendered"></div>
+    <div class="modal-actions">
+      <button id="vEdit" class="primary">編集</button>
+      <span class="spacer"></span>
+      <button id="vClose">閉じる</button>
     </div>
   </div>
 </div>
@@ -227,6 +259,7 @@ async function gh(path, opts={}){
   });
   if (res.status === 401) throw new Error("認証エラー (401)。トークンを確認してください。");
   if (res.status === 403) throw new Error("権限エラー (403)。トークンに Contents: Read and write があるか確認。");
+  if (res.status === 409 || res.status === 422){ throw new Error("CONFLICT"); }
   if (!res.ok && res.status !== 404){ const e = await res.text(); throw new Error(`API ${res.status}: ${e.slice(0,200)}`); }
   return res;
 }
@@ -253,6 +286,7 @@ async function putTask(t, sha){
 /* ===== state ===== */
 let TASKS = [];
 let editing = null;
+let viewing = null;
 
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 function nextId(){
@@ -260,11 +294,18 @@ function nextId(){
   TASKS.forEach(t=>{ const m=(t.id||"").match(/T-(\d+)/); if(m) max=Math.max(max, +m[1]); });
   return "T-" + String(max+1).padStart(4,"0");
 }
-function dueSoon(due){
-  if (!due) return false;
-  const d = new Date(due+"T00:00:00"); if (isNaN(d)) return false;
-  const diff = (d - new Date()) / 86400000;
-  return diff <= 7;
+function daysToDue(due){
+  if (!due) return null;
+  const d = new Date(due+"T00:00:00"); if (isNaN(d)) return null;
+  return Math.floor((d - new Date(todayStr()+"T00:00:00")) / 86400000);
+}
+function dueClass(t){
+  if (t.status==="done") return "";
+  const n = daysToDue(t.due);
+  if (n===null) return "";
+  if (n < 0) return "overdue";
+  if (n <= 7) return "due-soon";
+  return "";
 }
 
 /* ===== filters ===== */
@@ -326,12 +367,12 @@ function render(){
           <span class="pill ${t.priority}">${PRIORITY_LABEL[t.priority]||t.priority}</span>
           <span class="pill cat">${esc(t.category)}</span>
           ${t.owner?`<span>👤 ${esc(t.owner)}</span>`:""}
-          ${t.due?`<span class="pill ${dueSoon(t.due)&&t.status!=="done"?"due-soon":""}">📅 ${esc(t.due)}</span>`:""}
+          ${t.due?`<span class="pill ${dueClass(t)}">📅 ${esc(t.due)}</span>`:""}
           ${t.tags.map(tag=>`<span class="tag">#${esc(tag)}</span>`).join("")}
         </div>`;
       card.addEventListener("dragstart", e=>{ e.dataTransfer.setData("text/plain", t.file); e.dataTransfer.effectAllowed="move"; card.classList.add("dragging"); });
       card.addEventListener("dragend", ()=> card.classList.remove("dragging"));
-      card.onclick = ()=> openEdit(t);
+      card.onclick = ()=> openView(t);
       body.appendChild(card);
     });
     board.appendChild(col);
@@ -378,7 +419,9 @@ async function saveTask(){
     else { const i = TASKS.findIndex(x=>x.file===t.file); if(i>=0) TASKS[i]=t; }
     closeEdit(); render(); banner("ok", `保存しました: ${t.id} ${t.title}`);
     setTimeout(()=>banner(""), 2500);
-  }catch(e){ $("mSaving").textContent = ""; banner("err", e.message); }
+  }catch(e){ $("mSaving").textContent = "";
+    if (e.message==="CONFLICT"){ closeEdit(); banner("err","競合: 他の人が先に更新していました。最新を再読込します。再度編集してください。"); load(); }
+    else banner("err", e.message); }
 }
 
 async function moveTask(t, status){
@@ -390,7 +433,9 @@ async function moveTask(t, status){
     t.sha = res.content?.sha;
     banner("ok", `「${t.title}」→ ${STATUSES.find(s=>s.key===status).label}`);
     setTimeout(()=>banner(""), 2000);
-  }catch(e){ t.status = prev; render(); banner("err", e.message); }
+  }catch(e){ t.status = prev;
+    if (e.message==="CONFLICT"){ banner("err","競合: 他の人が先に更新していました。再読込します。"); load(); }
+    else { render(); banner("err", e.message); } }
 }
 
 async function deleteTask(){
@@ -406,8 +451,66 @@ async function deleteTask(){
     TASKS = TASKS.filter(x=>x.file!==target.file);
     closeEdit(); render(); banner("ok", `削除しました: ${target.id}`);
     setTimeout(()=>banner(""), 2000);
-  }catch(e){ $("mSaving").textContent = ""; banner("err", e.message); }
+  }catch(e){ $("mSaving").textContent = "";
+    if (e.message==="CONFLICT"){ closeEdit(); banner("err","競合: 他の人が先に更新していました。再読込します。"); load(); }
+    else banner("err", e.message); }
 }
+
+/* ===== 詳細ビュー + Markdown ===== */
+function mdInline(s){
+  s = esc(s);
+  s = s.replace(/`([^`]+)`/g, (_,c)=>`<code>${c}</code>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, (_,c)=>`<strong>${c}</strong>`);
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_,t,u)=>`<a href="${/^https?:\/\//.test(u)?esc(u):"#"}" target="_blank" rel="noopener">${t}</a>`);
+  return s;
+}
+function mdToHtml(src){
+  const lines = (src||"").split("\n");
+  const splitRow = l => l.trim().replace(/^\||\|$/g,"").split("|").map(c=>c.trim());
+  let html="", i=0, listOpen=false;
+  const closeList=()=>{ if(listOpen){ html+="</ul>"; listOpen=false; } };
+  while (i<lines.length){
+    const line = lines[i];
+    if (/^\s*\|.*\|\s*$/.test(line) && i+1<lines.length && /-/.test(lines[i+1]) && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i+1])){
+      closeList();
+      const header = splitRow(line); i+=2; const rows=[];
+      while (i<lines.length && /^\s*\|.*\|\s*$/.test(lines[i])){ rows.push(splitRow(lines[i])); i++; }
+      html += "<table><thead><tr>"+header.map(h=>`<th>${mdInline(h)}</th>`).join("")+"</tr></thead><tbody>"
+            + rows.map(r=>"<tr>"+r.map(c=>`<td>${mdInline(c)}</td>`).join("")+"</tr>").join("")+"</tbody></table>";
+      continue;
+    }
+    let m;
+    if (m=line.match(/^(#{1,3})\s+(.*)$/)){ closeList(); const lv=m[1].length; html+=`<h${lv}>${mdInline(m[2])}</h${lv}>`; i++; continue; }
+    if (/^\s*---\s*$/.test(line)){ closeList(); html+="<hr>"; i++; continue; }
+    if (m=line.match(/^\s*[-*]\s+(.*)$/)){
+      if(!listOpen){ html+="<ul>"; listOpen=true; }
+      const tk = m[1].match(/^\[([ xX])\]\s+(.*)$/);
+      if (tk) html+=`<li class="task"><input type="checkbox" disabled ${tk[1].toLowerCase()==="x"?"checked":""}>${mdInline(tk[2])}</li>`;
+      else html+=`<li>${mdInline(m[1])}</li>`;
+      i++; continue;
+    }
+    if (line.trim()===""){ closeList(); i++; continue; }
+    closeList(); html+=`<p>${mdInline(line)}</p>`; i++;
+  }
+  closeList();
+  return html;
+}
+function openView(t){
+  viewing = t;
+  $("vTitle").textContent = t.title;
+  $("vFileNote").textContent = `${REPO.dir}/${t.file}`;
+  const st = STATUSES.find(s=>s.key===t.status) || STATUSES[0];
+  $("vMeta").innerHTML = `
+    <span class="pill" style="border-color:${st.color};color:${st.color}">${st.label}</span>
+    <span class="pill ${t.priority}">${PRIORITY_LABEL[t.priority]||t.priority}</span>
+    <span class="pill cat">${esc(t.category)}</span>
+    ${t.owner?`<span>👤 ${esc(t.owner)}</span>`:""}
+    ${t.due?`<span class="pill ${dueClass(t)}">📅 ${esc(t.due)}</span>`:""}
+    ${t.tags.map(tag=>`<span class="tag">#${esc(tag)}</span>`).join("")}`;
+  $("vBody").innerHTML = t.body ? mdToHtml(t.body) : `<p style="color:var(--muted)">（詳細なし）</p>`;
+  $("viewOverlay").classList.add("open");
+}
+function closeView(){ $("viewOverlay").classList.remove("open"); viewing=null; }
 
 /* ===== load ===== */
 async function load(){
@@ -430,7 +533,10 @@ $("tokenClear").onclick = ()=>{ localStorage.removeItem(TOKEN_KEY); $("tokenInpu
 $("tokenCancel").onclick = ()=> $("tokenOverlay").classList.remove("open");
 ["fCategory","fOwner","fTag","fPriority","fHideDone"].forEach(id=> $(id).onchange = render);
 $("fSearch").oninput = render;
-[$("overlay"),$("tokenOverlay")].forEach(o=> o.onclick = (e)=>{ if(e.target===o) o.classList.remove("open"); });
+$("vEdit").onclick = ()=>{ const t = viewing; closeView(); openEdit(t); };
+$("vClose").onclick = closeView;
+[$("overlay"),$("tokenOverlay"),$("viewOverlay")].forEach(o=> o.onclick = (e)=>{ if(e.target===o) o.classList.remove("open"); });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape") document.querySelectorAll(".overlay.open").forEach(o=>o.classList.remove("open")); });
 
 load();
 </script>
